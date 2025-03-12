@@ -6,6 +6,12 @@ import json
 import os
 import logging
 from logging.handlers import RotatingFileHandler
+import random
+import sys
+import time
+
+# 账号配置文件名
+ACCOUNT_CONFIG_FILE = "ecust_accounts.json"
 
 # 配置日志
 def setup_logger():
@@ -26,6 +32,13 @@ def setup_logger():
     file_format = logging.Formatter('%(asctime)s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     file_handler.setFormatter(file_format)
     
+    # 添加过滤器，排除等待进程日志
+    class WaitingFilter(logging.Filter):
+        def filter(self, record):
+            return not hasattr(record, 'waiting_log') or not record.waiting_log
+    
+    file_handler.addFilter(WaitingFilter())
+    
     # 添加处理器到logger
     logger.addHandler(console_handler)
     logger.addHandler(file_handler)
@@ -35,12 +48,62 @@ def setup_logger():
 # 创建日志实例
 logger = setup_logger()
 
-# 多组账号密码配置，增加延时设置
-login_credentials = [
-    {"iphone": "13810105050", "password": "gg112233", "delay": 0},  # 默认不延时
-    {"iphone": "18040407070", "password": "tt667788", "delay": 3},  # 延时3s
-    # 可以添加更多账号
-]
+# 为等待过程创建特殊的日志函数
+def log_waiting(message):
+    """仅输出到控制台，不记录到日志文件"""
+    record = logging.LogRecord(
+        name=logger.name,
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg=message,
+        args=(),
+        exc_info=None
+    )
+    record.waiting_log = True  # 标记为等待日志
+    logger.handle(record)
+
+# 加载账号配置
+def load_account_config():
+    try:
+        with open(ACCOUNT_CONFIG_FILE, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+            
+            # 验证配置格式是否正确
+            if not isinstance(config, list):
+                logger.error(f"账号配置文件格式错误，应为列表")
+                return None
+                
+            for account in config:
+                if not all(key in account for key in ["iphone", "password"]):
+                    logger.error(f"账号配置缺少必要信息")
+                    return None
+                    
+            return config
+    except FileNotFoundError:
+        logger.error(f"账号配置文件 {ACCOUNT_CONFIG_FILE} 不存在")
+        return None
+    except json.JSONDecodeError:
+        logger.error(f"账号配置文件解析失败，请检查JSON格式")
+        return None
+    except Exception as e:
+        logger.error(f"加载账号配置时出错: {e}")
+        return None
+
+# 创建默认账号配置文件
+def create_default_account_config():
+    default_config = [
+        {"iphone": "13800000000", "password": "yourpassword", "delay": 0}
+    ]
+    
+    try:
+        with open(ACCOUNT_CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(default_config, f, indent=2, ensure_ascii=False)
+        logger.info(f"已创建默认账号配置文件 {ACCOUNT_CONFIG_FILE}，请编辑后重新运行")
+        return True
+    except Exception as e:
+        logger.error(f"创建账号配置文件失败: {e}")
+        return False
 
 # 创建缓存目录函数
 def ensure_cache_dir():
@@ -172,7 +235,7 @@ async def run_test_for_account(credentials):
                 else:
                     # 如果凭证无效或其他错误，尝试重新登录
                     if response1.get('code') == -2:
-                        logger.info(f"{log_prefix}凭证无效，尝试重新登录")
+                        logger.info(f"{log_prefix}缓存凭证无效，尝试重新登录")
                         # 清除缓存中的无效凭证
                         save_credentials_to_cache(phone, "", "")  # 清空凭证
                         # 重新运行此账号
@@ -181,7 +244,9 @@ async def run_test_for_account(credentials):
                         logger.info(f"{log_prefix}账号重复跑步或其他错误，停止运行。响应: {response1}")
                         return False
 
-            # 步骤2：请求 createLine 接口
+            # 步骤2：请求 createLine 接口（随机化distance）
+            # 随机生成一个0.2-2.0之间保留一位小数的数值
+            random_distance = round(random.uniform(0.2, 2.0), 1)
             url2 = 'https://run.ecust.edu.cn/api/createLine/'
             payload2 = {
                 "student_id": stuid,
@@ -190,23 +255,23 @@ async def run_test_for_account(credentials):
                         "point_name": "37",
                         "lng": "121.502959",
                         "lat": "30.82702",
-                        "distance": 0.6
+                        "distance": random_distance
                     },
                     {
                         "point_name": "37",
                         "lng": "121.502959",
                         "lat": "30.82702",
-                        "distance": 0.6
+                        "distance": random_distance
                     },
                     {
                         "point_name": "37",
                         "lng": "121.502959",
                         "lat": "30.82702",
-                        "distance": 0.6
+                        "distance": random_distance
                     }
                 ]
             }
-            logger.info(f"{log_prefix}步骤2：创建路线")
+            logger.info(f"{log_prefix}步骤2：创建路线 (distance={random_distance})")
             async with session.post(url2, json=payload2, headers=headers) as resp:
                 response2 = await resp.json()
                 record_id = response2.get('data', {}).get('record_id')
@@ -220,37 +285,57 @@ async def run_test_for_account(credentials):
             logger.info(f"{log_prefix}步骤3：获取跑步前数据统计")
             await get_running_data(session, headers, log_prefix)
 
-            # 步骤4：等待10分钟，每60秒打印一次日志
-            wait_time = 600  # 10分钟，单位为秒
-            log_interval = 60  # 每60秒打印一次日志
-            logger.info(f"{log_prefix}步骤4：开始等待10分钟")
-            for remaining in range(wait_time, 0, -log_interval):
-                logger.info(f"{log_prefix}剩余时间：{remaining} 秒")
-                await asyncio.sleep(log_interval)
-            logger.info(f"{log_prefix}等待结束")
+            # 步骤4：随机化等待时间（600秒乘以1-1.3的随机数）
+            wait_multiplier = random.uniform(1.0, 1.3)
+            wait_time = int(600 * wait_multiplier)  # 随机化等待时间
+            logger.info(f"{log_prefix}步骤4：开始等待{wait_time}秒")
 
-            # 步骤5：请求 updateRecord 接口
+            # 实现每秒更新的倒计时
+            start_time = time.time()
+            end_time = start_time + wait_time
+            while time.time() < end_time:
+                remaining = int(end_time - time.time())
+                log_waiting(f"{log_prefix}倒计时：{remaining}秒")
+                await asyncio.sleep(1)
+                # 清除上一行输出
+                print("\r", end="")
+            
+            # 清除倒计时显示，打印完成信息
+            print("\r", end="")
+            logger.info(f"{log_prefix}等待结束，实际等待了{wait_time}秒")
+
+            # 步骤5：请求 updateRecord 接口（随机化数据）
             url3 = 'https://run.ecust.edu.cn/api/updateRecord/'
             end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # 随机化经纬度（±0.1范围内浮动）
+            random_lat = 30.831605902777778 + random.uniform(-0.1, 0.1)
+            random_lng = 121.50631998697916 + random.uniform(-0.1, 0.1)
+            
+            # 随机化其他数据（按等待时间的比例调整）
+            random_running_time = int(601 * wait_multiplier)
+            random_mileage = int(2001 * wait_multiplier)
+            random_step_count = 2000.4117647058823533 * wait_multiplier
+            
             payload3 = {
                 "id": stuid,
                 "pace": 301,
-                "running_time": 601,
+                "running_time": random_running_time,
                 "record_id": str(record_id),
-                "mileage": 2001,
+                "mileage": random_mileage,
                 "pass_point": 3,
                 "start_time": start_time_str,
-                "lat": 30.831605902777778,
-                "step_count": 2000.4117647058823533,
+                "lat": random_lat,
+                "step_count": random_step_count,
                 "end_time": end_time_str,
-                "lng": 121.50631998697916,
+                "lng": random_lng,
                 "student_id": stuid
             }
             logger.info(f"{log_prefix}步骤5：更新跑步记录")
             async with session.post(url3, json=payload3, headers=headers) as resp:
                 response3 = await resp.json()
                 if response3.get('code') != 1:
-                    logger.info(f"{log_prefix}更新跑步记录失败。响应: {response3}")
+                    logger.info(f"{log_prefix}更新跑步记录失败。账号可能被踢下线。响应: {response3}")
                     return False
                 logger.info(f"{log_prefix}更新跑步记录成功")
             
@@ -265,6 +350,20 @@ async def run_test_for_account(credentials):
         return False
 
 async def main():
+    # 加载账号配置
+    login_credentials = load_account_config()
+    
+    # 如果配置加载失败，创建默认配置文件并退出
+    if login_credentials is None:
+        create_default_account_config()
+        logger.info("请编辑账号配置文件后重新运行")
+        return
+    
+    # 如果没有账号配置，退出
+    if len(login_credentials) == 0:
+        logger.info("账号配置为空，请添加账号后重新运行")
+        return
+        
     # 创建所有账号的运行任务
     tasks = [run_test_for_account(credentials) for credentials in login_credentials]
     
@@ -293,5 +392,5 @@ async def main():
 
 if __name__ == "__main__":
     logger.info(f"当前时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"开始运行 {len(login_credentials)} 个账号")
+    logger.info(f"开始加载账号配置...")
     asyncio.run(main())
