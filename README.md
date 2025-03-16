@@ -1,6 +1,8 @@
 
 某校园跑（课活）自动完成 --- python版
 
+<a href="http://124.220.205.119/down.html"><img src="http://124.220.205.119/download/img.png"></img></a>
+
 ```
 python3 ./main.py
 ```
