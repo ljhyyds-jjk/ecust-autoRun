@@ -11,9 +11,9 @@ python3 ./main.py
 
 ```
 [
-  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": 0 },
-  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": 30 },
-  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": 60 }
+  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": 0 }, //立即执行
+  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": 30 }, //延时30s开始
+  { "iphone": "xxxxxxxxxxx", "password": "xxxxxxxxxxx", "delay": "30-60" } //随机延时
 ]
 ```
 
