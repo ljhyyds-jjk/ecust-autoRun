@@ -1,0 +1,25 @@
+name: Daily Python Script
+
+on:
+  schedule:
+    - cron: '0 23 * * *'
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check
+        uses: actions/checkout@v4
+
+      - name: Python Setup
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run:
+          pip install -r requirements.txt
+
+      - name: Run main
+        run: python main.py
