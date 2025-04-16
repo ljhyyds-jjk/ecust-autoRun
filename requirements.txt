@@ -1,7 +1,6 @@
 aiohttp
 asyncio
 datetime
-json
 os
 logging
 random
